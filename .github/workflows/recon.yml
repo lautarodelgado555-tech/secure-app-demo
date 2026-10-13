@@ -1,0 +1,19 @@
+name: recon
+on:
+  push:
+    branches: [recon]
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch pages
+        run: node recon/fetch.mjs
+      - name: Upload raw
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages
+          path: recon/out
