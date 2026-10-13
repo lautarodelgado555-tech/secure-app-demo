@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security inspection of an AI-built app — Lautaro Delgado</title>
+<meta name="description" content="A before-and-after security review of an invoice app built with an AI app builder on Supabase: five real-world issues and how each was fixed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAFAF7; --ink:#14213D; --ink-soft:#4A5672; --rule:#D9DCE3;
+    --tag:#F2B705; --risk:#B3122E; --high:#C2570C; --medium:#8A6A00; --fixed:#1F7A4D;
+    --code-bg:#14213D; --code-ink:#E8ECF4;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+  body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.6 "IBM Plex Sans",system-ui,sans-serif}
+  a{color:var(--ink)}
+  :focus-visible{outline:3px solid var(--tag);outline-offset:3px}
+  .wrap{max-width:780px;margin:0 auto;padding:0 20px}
+  h1,h2,h3{font-family:"Archivo",system-ui,sans-serif;font-variation-settings:"wdth" 118;line-height:1.1;margin:0}
+  h1{font-size:clamp(2.2rem,6vw,3.6rem);font-weight:800;letter-spacing:-.01em}
+  h2{font-size:1.9rem;font-weight:750;margin-bottom:.6rem}
+  h3{font-size:1.35rem;font-weight:700}
+  p{margin:.6rem 0}
+
+  /* Hero: the inspection tag */
+  header{padding:56px 0 40px;border-bottom:1px solid var(--rule)}
+  .hero{display:grid;grid-template-columns:1fr auto;gap:40px;align-items:center}
+  .lede{color:var(--ink-soft);font-size:1.15rem;max-width:34em}
+  .tag{position:relative;width:210px;background:var(--tag);color:var(--ink);padding:34px 22px 22px;
+       border-radius:6px 6px 16px 16px;transform:rotate(3deg);box-shadow:0 10px 24px rgba(20,33,61,.18)}
+  .tag::before{content:"";position:absolute;top:12px;left:50%;width:14px;height:14px;margin-left:-7px;
+       border-radius:50%;background:var(--paper);box-shadow:inset 0 0 0 3px var(--ink)}
+  .tag .big{font-family:"Archivo",system-ui,sans-serif;font-variation-settings:"wdth" 125;font-weight:800;font-size:3.6rem;line-height:1}
+  .tag .small{font-weight:600;font-size:.95rem}
+  .tag hr{border:0;border-top:2px dashed var(--ink);margin:12px 0}
+  @media (max-width:640px){.hero{grid-template-columns:1fr}.tag{justify-self:start;transform:rotate(-2deg)}}
+
+  /* Before / after switch */
+  .switchbar{position:sticky;top:0;z-index:5;background:rgba(250,250,247,.94);backdrop-filter:blur(6px);
+       border-bottom:1px solid var(--rule)}
+  .switchbar .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:12px;padding-bottom:12px}
+  .switch{display:inline-flex;border:2px solid var(--ink);border-radius:999px;overflow:hidden}
+  .switch button{font:600 .95rem "IBM Plex Sans",system-ui,sans-serif;border:0;background:transparent;color:var(--ink);padding:8px 18px;cursor:pointer}
+  .switch button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+  .status{font-size:.95rem;color:var(--ink-soft)}
+  @media (max-width:520px){.status{display:none}}
+
+  /* Findings */
+  main section{padding:44px 0;border-bottom:1px solid var(--rule)}
+  .finding-head{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;margin-bottom:6px}
+  .sev{font-weight:600;font-size:.85rem;padding:2px 10px;border-radius:999px;color:#fff}
+  .sev.critical{background:var(--risk)} .sev.high{background:var(--high)} .sev.medium{background:var(--medium)}
+  .state{font-weight:600;font-size:.85rem;padding:2px 10px;border-radius:999px;border:2px solid currentColor}
+  body.before .state{color:var(--risk)} body.after .state{color:var(--fixed)}
+  body.before .state::after{content:"Open"} body.after .state::after{content:"Fixed"}
+  .impact{color:var(--ink-soft)}
+  .impact strong{color:var(--ink)}
+  pre{background:var(--code-bg);color:var(--code-ink);font:14px/1.55 "IBM Plex Mono",monospace;padding:18px 20px;
+      border-radius:10px;overflow-x:auto;margin:16px 0 8px;border-left:6px solid var(--risk)}
+  body.after pre{border-left-color:var(--fixed)}
+  .code-after{display:none} body.after .code-before{display:none} body.after .code-after{display:block}
+  .note{font-size:.95rem;color:var(--ink-soft)}
+
+  /* Checklist */
+  .check{list-style:none;padding:0;margin:20px 0}
+  .check li{border-top:1px solid var(--rule)}
+  .check li:last-child{border-bottom:1px solid var(--rule)}
+  .check label{display:flex;gap:14px;align-items:flex-start;padding:14px 4px;cursor:pointer}
+  .check input{width:22px;height:22px;margin-top:2px;accent-color:var(--fixed);flex:none}
+  .score{font-family:"Archivo",system-ui,sans-serif;font-variation-settings:"wdth" 118;font-weight:750;font-size:1.3rem;margin-top:8px}
+  .verdict{color:var(--ink-soft)}
+
+  /* Contact */
+  .contact{padding:56px 0 72px}
+  .cta{display:inline-block;background:var(--ink);color:var(--paper);text-decoration:none;font-weight:600;
+       padding:14px 24px;border-radius:999px;margin-top:12px}
+  .cta:hover{background:#22325a}
+  footer{border-top:1px solid var(--rule);padding:20px 0 40px;font-size:.9rem;color:var(--ink-soft)}
+</style>
+</head>
+<body class="before">
+
+<header>
+  <div class="wrap hero">
+    <div>
+      <h1>Inspection report: an invoice app built with AI</h1>
+      <p class="lede">Ledgerly is a small invoicing app generated with an AI app builder on Supabase. It worked fine in the preview. Before launch, I reviewed it the way an attacker would and found five problems. Flip the switch to see each one fixed.</p>
+    </div>
+    <div class="tag" aria-label="Inspection result">
+      <div class="small">Issues found</div>
+      <div class="big">5</div>
+      <hr>
+      <div class="small" id="tag-open">5 still open</div>
+    </div>
+  </div>
+</header>
+
+<div class="switchbar">
+  <div class="wrap">
+    <div class="switch" role="group" aria-label="Show the app before or after the review">
+      <button type="button" data-mode="before" aria-pressed="true">Before review</button>
+      <button type="button" data-mode="after" aria-pressed="false">After fixes</button>
+    </div>
+    <span class="status" id="status" aria-live="polite">Showing the code as the AI builder wrote it</span>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <section id="f1">
+    <div class="finding-head"><h3>Every customer's invoices were public</h3><span class="sev critical">Critical</span><span class="state"></span></div>
+    <p class="impact"><strong>What could happen:</strong> the invoices table had Row Level Security turned off. The public key that ships in every browser could read all invoices from all customers, with names, amounts and emails.</p>
+<pre class="code-before"><code>-- Table created by the AI builder
+create table invoices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users,
+  client_name text,
+  amount numeric,
+  paid boolean default false
+);
+-- Row Level Security never enabled</code></pre>
+<pre class="code-after"><code>alter table invoices enable row level security;
+
+create policy "Users read their own invoices"
+  on invoices for select to authenticated
+  using (auth.uid() = user_id);
+
+create policy "Users create their own invoices"
+  on invoices for insert to authenticated
+  with check (auth.uid() = user_id);</code></pre>
+    <p class="note">Each user now sees only their own rows, enforced by the database, not by the screen.</p>
+  </section>
+
+  <section id="f2">
+    <div class="finding-head"><h3>The master database key was in the browser</h3><span class="sev critical">Critical</span><span class="state"></span></div>
+    <p class="impact"><strong>What could happen:</strong> the service role key skips every security rule. Anyone who opened the browser's developer tools could copy it and read, change or delete the whole database.</p>
+<pre class="code-before"><code># .env, bundled into the frontend
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...</code></pre>
+<pre class="code-after"><code># .env (frontend): only the public key
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOi...
+
+# Server secret (Edge Function), never shipped to the browser
+SUPABASE_SERVICE_ROLE_KEY=********</code></pre>
+    <p class="note">The leaked key was rotated, and admin work moved to a server function that keeps the key secret.</p>
+  </section>
+
+  <section id="f3">
+    <div class="finding-head"><h3>Any user could make themselves an admin</h3><span class="sev high">High</span><span class="state"></span></div>
+    <p class="impact"><strong>What could happen:</strong> the user's role was a column in their own profile, and users were allowed to edit their profile. One request changing <code>role</code> to <code>admin</code> unlocked the admin panel.</p>
+<pre class="code-before"><code>create policy "Users update their profile"
+  on profiles for update
+  using (auth.uid() = id);   -- includes the role column
+
+-- frontend
+if (profile.role === 'admin') showAdminPanel();</code></pre>
+<pre class="code-after"><code>-- Roles live in their own table with no client write policy
+create table user_roles (
+  user_id uuid references auth.users on delete cascade,
+  role text check (role in ('user', 'admin')),
+  primary key (user_id, role)
+);
+alter table user_roles enable row level security;
+
+create function is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from user_roles
+                 where user_id = auth.uid() and role = 'admin')
+$$;</code></pre>
+    <p class="note">Admin access is now checked by the database on every request. Hiding the button is only cosmetic.</p>
+  </section>
+
+  <section id="f4">
+    <div class="finding-head"><h3>Fake "payment received" messages were accepted</h3><span class="sev high">High</span><span class="state"></span></div>
+    <p class="impact"><strong>What could happen:</strong> the payment webhook trusted any request that looked like Stripe. Anyone could mark an invoice as paid without paying.</p>
+<pre class="code-before"><code>// Edge Function: stripe-webhook
+const event = await req.json();
+if (event.type === 'checkout.session.completed') {
+  await markInvoicePaid(event.data.object.metadata.invoice_id);
+}</code></pre>
+<pre class="code-after"><code>// Edge Function: stripe-webhook
+const body = await req.text();
+const signature = req.headers.get('stripe-signature');
+const event = await stripe.webhooks.constructEventAsync(
+  body, signature, Deno.env.get('STRIPE_WEBHOOK_SECRET')
+); // throws if the message didn't come from Stripe
+
+if (event.type === 'checkout.session.completed'
+    && event.data.object.payment_status === 'paid') {
+  await markInvoicePaid(event.data.object.metadata.invoice_id);
+}</code></pre>
+    <p class="note">Only messages signed by Stripe can change an invoice's status.</p>
+  </section>
+
+  <section id="f5">
+    <div class="finding-head"><h3>The browser decided how much to charge</h3><span class="sev medium">Medium</span><span class="state"></span></div>
+    <p class="impact"><strong>What could happen:</strong> the checkout took the price from the request sent by the browser. Editing one number paid a $49 plan with $1.</p>
+<pre class="code-before"><code>// create-checkout
+const { planId, amount } = await req.json();
+await stripe.checkout.sessions.create({
+  line_items: [{ price_data: { unit_amount: amount, ... }, quantity: 1 }],
+});</code></pre>
+<pre class="code-after"><code>// create-checkout
+const { planId } = await req.json();
+const { data: plan } = await supabaseAdmin
+  .from('plans').select('stripe_price_id').eq('id', planId).single();
+await stripe.checkout.sessions.create({
+  line_items: [{ price: plan.stripe_price_id, quantity: 1 }],
+});</code></pre>
+    <p class="note">Prices now come from the server. The browser only says which plan.</p>
+  </section>
+
+  <section id="checklist">
+    <h2>Check your own app in two minutes</h2>
+    <p>Tick what is true for your app. Each unticked line is worth a closer look before you launch.</p>
+    <ul class="check" id="check">
+      <li><label><input type="checkbox">Row Level Security is enabled on every table.</label></li>
+      <li><label><input type="checkbox">No policy on private data uses <code>using (true)</code>.</label></li>
+      <li><label><input type="checkbox">The service role key is only in server secrets, never in the frontend.</label></li>
+      <li><label><input type="checkbox">Users can't edit their own role or permissions.</label></li>
+      <li><label><input type="checkbox">Admin pages are protected by the database, not just hidden buttons.</label></li>
+      <li><label><input type="checkbox">Payment webhooks verify the provider's signature.</label></li>
+      <li><label><input type="checkbox">Prices and totals are calculated on the server.</label></li>
+      <li><label><input type="checkbox">Storage buckets are private unless meant to be public.</label></li>
+      <li><label><input type="checkbox">New accounts confirm their email.</label></li>
+      <li><label><input type="checkbox">No secret keys are committed to your Git repository.</label></li>
+    </ul>
+    <div class="score" id="score" aria-live="polite">0 of 10</div>
+    <p class="verdict" id="verdict">Start ticking to see where your app stands.</p>
+  </section>
+
+  <section class="contact" id="contact">
+    <h2>Want me to inspect your app?</h2>
+    <p>I'm Lautaro, a full-stack developer in Buenos Aires who builds and maintains Supabase apps for real businesses. I review apps built with Lovable, Bolt, Replit or v0, send you a plain-English report ranked by risk, and fix what matters before you launch. I only test apps I have the owner's written permission to review.</p>
+    <a class="cta" href="https://www.upwork.com/freelancers/~0187eeb5cc23b91d3d" rel="noopener">Hire me on Upwork</a>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">Ledgerly is a demo app made for this case study; no real customer data was involved. © 2026 Lautaro Delgado.</div>
+</footer>
+
+<script>
+  const buttons = document.querySelectorAll('.switch button');
+  const status = document.getElementById('status');
+  const tagOpen = document.getElementById('tag-open');
+  function setMode(mode){
+    document.body.classList.toggle('before', mode === 'before');
+    document.body.classList.toggle('after', mode === 'after');
+    buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    status.textContent = mode === 'after' ? 'Showing the code after my fixes' : 'Showing the code as the AI builder wrote it';
+    tagOpen.textContent = mode === 'after' ? 'All 5 fixed' : '5 still open';
+  }
+  buttons.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+  const boxes = document.querySelectorAll('#check input');
+  const score = document.getElementById('score');
+  const verdict = document.getElementById('verdict');
+  function update(){
+    const n = [...boxes].filter(b => b.checked).length;
+    score.textContent = `${n} of 10`;
+    verdict.textContent =
+      n === 0 ? 'Start ticking to see where your app stands.' :
+      n === 10 ? 'Solid basics. A review can still catch logic issues these checks miss.' :
+      n >= 7 ? `Close. Fix the ${10 - n} unticked item${10 - n > 1 ? 's' : ''} before real users or payments arrive.` :
+      'Several basics are missing. Don\'t take payments or personal data until they are fixed.';
+  }
+  boxes.forEach(b => b.addEventListener('change', update));
+</script>
+</body>
+</html>
